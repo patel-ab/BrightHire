@@ -1,5 +1,9 @@
 package com.brighthire.gateway.service;
 
+import com.brighthire.gateway.kafka.producer.KafkaProducerService;
+import com.brighthire.gateway.kafka.event.ApplicationReceivedEvent;
+import com.brighthire.gateway.kafka.event.StatusChangedEvent;
+import com.brighthire.gateway.kafka.event.ApplicationWithdrawnEvent;
 import com.brighthire.gateway.dto.request.ApplicationRequest;
 import com.brighthire.gateway.dto.response.ApplicationResponse;
 import com.brighthire.gateway.model.Application;
@@ -20,6 +24,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ApplicationService {
 
+    private final KafkaProducerService kafkaProducerService;
     private final ApplicationRepository applicationRepository;
     private final JobRepository jobRepository;
     private final UserRepository userRepository;
@@ -57,9 +62,20 @@ public class ApplicationService {
 
         Application saved = applicationRepository.save(application);
         applicationRepository.flush();
-        return toResponse(
-                applicationRepository.findById(saved.getId()).get()
+        Application reloaded = applicationRepository.findById(saved.getId()).get();
+
+        // ── Kafka event ───────────────────────────────────────
+        ApplicationReceivedEvent event = new ApplicationReceivedEvent(
+                reloaded.getId(),
+                job.getId(),
+                candidate.getId(),
+                resume.getId(),
+                resume.getRawText(),
+                job.getJdVector()
         );
+        kafkaProducerService.publishApplicationReceived(event);
+
+        return toResponse(reloaded);
     }
 
     // ─── READ ─────────────────────────────────────────────
@@ -104,15 +120,35 @@ public class ApplicationService {
             UUID id, String status) {
         validateStatus(status);
         return applicationRepository.findById(id).map(application -> {
+
+            String oldStatus = application.getStatus();
             application.setStatus(status);
-            return toResponse(applicationRepository.save(application));
+            Application saved = applicationRepository.save(application);
+
+            // ── Kafka event ───────────────────────────────────
+            StatusChangedEvent event = new StatusChangedEvent(
+                    saved.getId(),
+                    saved.getJob().getId(),
+                    saved.getUser().getId(),
+                    oldStatus,
+                    status,
+                    saved.getUser().getEmail(),
+                    saved.getUser().getFullName(),
+                    saved.getJob().getTitle(),
+                    saved.getJob().getCompany().getName()
+            );
+            kafkaProducerService.publishStatusChanged(event);
+            // ─────────────────────────────────────────────────
+
+            return toResponse(saved);
         });
     }
 
     // ─── WITHDRAW ─────────────────────────────────────────
 
     @Transactional
-    public Optional<ApplicationResponse> withdraw(UUID id, UUID userId) {
+    public Optional<ApplicationResponse> withdraw(
+            UUID id, UUID userId) {
         return applicationRepository.findById(id).map(application -> {
             if (!application.getUser().getId().equals(userId)) {
                 throw new IllegalArgumentException(
@@ -130,7 +166,19 @@ public class ApplicationService {
                 );
             }
             application.setStatus("withdrawn");
-            return toResponse(applicationRepository.save(application));
+            Application saved = applicationRepository.save(application);
+
+            // ── Kafka event ───────────────────────────────────
+            ApplicationWithdrawnEvent event =
+                    new ApplicationWithdrawnEvent(
+                            saved.getId(),
+                            saved.getJob().getId(),
+                            saved.getUser().getId()
+                    );
+            kafkaProducerService.publishApplicationWithdrawn(event);
+            // ─────────────────────────────────────────────────
+
+            return toResponse(saved);
         });
     }
 

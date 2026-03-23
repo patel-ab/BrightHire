@@ -25,20 +25,16 @@ public class SecurityConfig {
             HttpSecurity http) throws Exception {
 
         http
-                // ── CSRF ──────────────────────────────────────
                 .csrf(csrf -> csrf.disable())
 
-                // ── SESSION ───────────────────────────────────
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(
                                 SessionCreationPolicy.STATELESS
                         )
                 )
 
-                // ── ROUTE PERMISSIONS ─────────────────────────
                 .authorizeHttpRequests(auth -> auth
 
-                        // Public routes — no token needed
                         .requestMatchers(
                                 "/auth/**",
                                 "/login/**",
@@ -46,7 +42,6 @@ public class SecurityConfig {
                                 "/oauth2/**"
                         ).permitAll()
 
-                        // Job listing — candidates browse freely
                         .requestMatchers(
                                 HttpMethod.GET, "/api/jobs"
                         ).permitAll()
@@ -55,12 +50,10 @@ public class SecurityConfig {
                                 HttpMethod.GET, "/api/jobs/{id}"
                         ).permitAll()
 
-                        // Company routes — admin only
                         .requestMatchers(
                                 "/api/companies/**"
                         ).hasRole("ADMIN")
 
-                        // Job management — recruiters only
                         .requestMatchers(
                                 HttpMethod.POST, "/api/jobs"
                         ).hasAnyRole("RECRUITER", "ADMIN")
@@ -73,17 +66,14 @@ public class SecurityConfig {
                                 HttpMethod.DELETE, "/api/jobs/**"
                         ).hasAnyRole("RECRUITER", "ADMIN")
 
-                        // Shortlist — recruiters only
                         .requestMatchers(
-                                "/api/jobs/{id}/shortlist"
+                                "/api/jobs/*/shortlist"
                         ).hasAnyRole("RECRUITER", "ADMIN")
 
-                        // Resume — candidates only
                         .requestMatchers(
                                 "/api/resumes/**"
                         ).hasAnyRole("CANDIDATE", "ADMIN")
 
-                        // Applications — candidates and recruiters
                         .requestMatchers(
                                 HttpMethod.POST, "/api/applications"
                         ).hasRole("CANDIDATE")
@@ -100,29 +90,25 @@ public class SecurityConfig {
 
                         .requestMatchers(
                                 HttpMethod.PATCH,
-                                "/api/applications/**/status"
+                                "/api/applications/*/status"
                         ).hasAnyRole("RECRUITER", "ADMIN")
 
                         .requestMatchers(
                                 HttpMethod.PATCH,
-                                "/api/applications/**/withdraw"
+                                "/api/applications/*/withdraw"
                         ).hasRole("CANDIDATE")
 
-                        // Notifications — authenticated users
                         .requestMatchers(
                                 "/api/notifications/**"
                         ).authenticated()
 
-                        // Everything else — must be logged in
                         .anyRequest().authenticated()
                 )
 
-                // ── OAUTH2 LOGIN ──────────────────────────────
                 .oauth2Login(oauth -> oauth
                         .successHandler(oAuthSuccessHandler)
                 )
 
-                // ── JWT FILTER ────────────────────────────────
                 .addFilterBefore(
                         jwtAuthFilter,
                         UsernamePasswordAuthenticationFilter.class
