@@ -1,5 +1,7 @@
 package com.brighthire.gateway.service;
 
+import com.brighthire.gateway.kafka.producer.KafkaProducerService;
+import com.brighthire.gateway.kafka.event.JobPostedEvent;
 import com.brighthire.gateway.dto.request.JobRequest;
 import com.brighthire.gateway.dto.response.JobResponse;
 import com.brighthire.gateway.model.Company;
@@ -19,6 +21,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class JobService {
 
+    private final KafkaProducerService kafkaProducerService;
     private final JobRepository jobRepository;
     private final CompanyRepository companyRepository;
     private final UserRepository userRepository;
@@ -56,7 +59,21 @@ public class JobService {
         // with this
         Job saved = jobRepository.save(job);
         jobRepository.flush();
-        return toResponse(jobRepository.findById(saved.getId()).get());
+        Job reloaded = jobRepository.findById(saved.getId()).get();
+
+        // Emit Kafka event after job saved successfully
+        JobPostedEvent event = new JobPostedEvent(
+                saved.getId(),
+                saved.getCompany().getId(),
+                saved.getCompany().getName(),
+                saved.getTitle(),
+                saved.getSeniority(),
+                saved.getRequiredSkills(),
+                saved.getLocation(),
+                saved.getCreatedAt()
+        );
+        kafkaProducerService.publishJobPosted(event);
+        return toResponse(reloaded);
     }
 
     // ─── READ ─────────────────────────────────────────────

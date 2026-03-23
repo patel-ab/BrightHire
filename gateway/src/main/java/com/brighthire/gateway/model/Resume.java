@@ -5,6 +5,8 @@ import lombok.Data;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.type.SqlTypes;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -29,6 +31,7 @@ public class Resume {
     @Column(name = "parsed_json", columnDefinition = "jsonb")
     private String parsedJson;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "resume_vector", columnDefinition = "jsonb")
     private String resumeVector;
 
