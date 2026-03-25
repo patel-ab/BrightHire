@@ -1,5 +1,6 @@
 package com.brighthire.gateway.controller;
 
+import com.brighthire.gateway.dto.response.ShortlistResponse;
 import com.brighthire.gateway.dto.request.JobRequest;
 import com.brighthire.gateway.dto.response.JobResponse;
 import com.brighthire.gateway.service.JobService;
@@ -60,5 +61,16 @@ public class JobController {
         return deleted
                 ? ResponseEntity.noContent().build()
                 : ResponseEntity.notFound().build();
+    }
+
+// ─── SHORTLIST ────────────────────────────────────────────
+// Returns top 20 candidates ranked by nlp_score
+// Reads from Redis sorted set, enriched with DB data
+    @GetMapping("/{id}/shortlist")
+    public ResponseEntity<List<ShortlistResponse>> getShortlist(
+            @PathVariable UUID id) {
+        return ResponseEntity.ok(
+                jobService.getShortlist(id)
+        );
     }
 }

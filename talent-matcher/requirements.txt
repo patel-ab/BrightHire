@@ -1,0 +1,23 @@
+# Kafka
+confluent-kafka
+
+# NLP — Stage 1 + 2
+sentence-transformers
+torch
+transformers
+
+# NLP — Stage 3 skill extraction
+spacy
+
+# Database
+psycopg2-binary
+redis
+
+# API
+fastapi
+uvicorn
+
+# Utilities
+python-dotenv
+numpy
+pydantic
