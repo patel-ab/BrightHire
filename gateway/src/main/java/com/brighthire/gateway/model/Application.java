@@ -44,7 +44,7 @@ public class Application {
     @Column(nullable = false, length = 20)
     private String status = "applied";
 
-    @Column(name = "ranking_version", length = 20)
+    @Column(name = "ranking_version", length = 100)
     private String rankingVersion;
 
     @CreationTimestamp

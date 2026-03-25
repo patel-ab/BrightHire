@@ -1,5 +1,10 @@
 package com.brighthire.gateway.service;
 
+
+import org.springframework.data.redis.core.RedisTemplate;
+import com.brighthire.gateway.dto.response.ShortlistResponse;
+import com.brighthire.gateway.repository.ApplicationRepository;
+import com.brighthire.gateway.model.Application;
 import com.brighthire.gateway.kafka.producer.KafkaProducerService;
 import com.brighthire.gateway.kafka.event.JobPostedEvent;
 import com.brighthire.gateway.dto.request.JobRequest;
@@ -11,16 +16,20 @@ import com.brighthire.gateway.repository.CompanyRepository;
 import com.brighthire.gateway.repository.JobRepository;
 import com.brighthire.gateway.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.math.BigDecimal;
 
 @Service
 @RequiredArgsConstructor
 public class JobService {
 
+    private final RedisTemplate<String, String> redisTemplate;
+    private final ApplicationRepository applicationRepository;
     private final KafkaProducerService kafkaProducerService;
     private final JobRepository jobRepository;
     private final CompanyRepository companyRepository;
@@ -141,6 +150,81 @@ public class JobService {
         }
         jobRepository.deleteById(id);
         return true;
+    }
+
+    // ─── SHORTLIST ────────────────────────────────────────────
+// Reads top 20 candidates from Redis sorted set
+// Enriches with user + application data from PostgreSQL
+// Returns ranked list ordered by nlp_score descending
+    public List<ShortlistResponse> getShortlist(UUID jobId) {
+
+        // Step 1 — verify job exists
+        if (!jobRepository.existsById(jobId)) {
+            throw new IllegalArgumentException(
+                    "Job with id " + jobId + " not found"
+            );
+        }
+
+        // Step 2 — read top 20 from Redis sorted set
+        // ZREVRANGE returns highest score first
+        String redisKey = "shortlist:" + jobId;
+        Set<ZSetOperations.TypedTuple<String>> redisResults =
+                redisTemplate.opsForZSet()
+                        .reverseRangeWithScores(redisKey, 0, 19);
+
+        if (redisResults == null || redisResults.isEmpty()) {
+            return List.of();
+        }
+
+        // Step 3 — enrich each entry with DB data
+        List<ShortlistResponse> shortlist = new ArrayList<>();
+        int rank = 1;
+
+        for (ZSetOperations.TypedTuple<String> entry : redisResults) {
+
+            String userIdStr = entry.getValue();
+            Double score = entry.getScore();
+
+            if (userIdStr == null || score == null) continue;
+
+            UUID userId = UUID.fromString(userIdStr);
+
+            // fetch application record for this user + job
+            Optional<Application> applicationOpt =
+                    applicationRepository
+                            .findByJobIdAndUserId(jobId, userId);
+
+            if (applicationOpt.isEmpty()) continue;
+
+            Application application = applicationOpt.get();
+
+            ShortlistResponse response = new ShortlistResponse();
+            response.setUserId(userId);
+            response.setUserFullName(
+                    application.getUser().getFullName()
+            );
+            response.setUserAvatarUrl(
+                    application.getUser().getAvatarUrl()
+            );
+            response.setApplicationId(application.getId());
+            response.setResumeId(application.getResume().getId());
+            response.setNlpScore(
+                    BigDecimal.valueOf(score)
+            );
+            response.setScoreBreakdown(
+                    application.getScoreBreakdown()
+            );
+            response.setRankingVersion(
+                    application.getRankingVersion()
+            );
+            response.setAppliedAt(application.getAppliedAt());
+            response.setRankedAt(application.getRankedAt());
+            response.setRank(rank++);
+
+            shortlist.add(response);
+        }
+
+        return shortlist;
     }
 
     // ─── MAPPING ──────────────────────────────────────────
