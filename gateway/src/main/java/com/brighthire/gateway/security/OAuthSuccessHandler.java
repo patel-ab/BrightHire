@@ -61,7 +61,7 @@ public class OAuthSuccessHandler
 
         // Step 4 — find existing user or create new one
         User user = findOrCreateUser(
-                provider, oauthId, email, fullName, avatarUrl, attributes
+                request, provider, oauthId, email, fullName, avatarUrl, attributes
         );
 
         // Step 5 — generate JWT tokens
@@ -106,6 +106,7 @@ public class OAuthSuccessHandler
     //              new user = create account
 
     private User findOrCreateUser(
+            HttpServletRequest request,
             String provider,
             String oauthId,
             String email,
@@ -132,14 +133,16 @@ public class OAuthSuccessHandler
         newUser.setOauthId(oauthId);
         newUser.setAvatarUrl(avatarUrl);
 
-        // Determine role and company based on provider
-        if ("google".equals(provider)) {
+        // Determine role from session
+        // falls back to provider-based guess if session empty
+        String intendedRole = extractIntendedRole(request);
+
+        if ("recruiter".equals(intendedRole)) {
             String domain = extractDomain(email);
             Company company;
 
             if ("gmail.com".equals(domain)) {
-                // Personal Gmail account
-                // Hardcoded TEST company for development
+                // personal Gmail — link to TEST company
                 company = companyRepository
                         .findByDomain("test.com")
                         .orElseGet(() -> {
@@ -150,8 +153,7 @@ public class OAuthSuccessHandler
                             return companyRepository.save(testCompany);
                         });
             } else {
-                // Company Google Workspace account
-                // Look up by domain
+                // company Google Workspace email
                 company = companyRepository
                         .findByDomain(domain)
                         .orElse(null);
@@ -161,12 +163,30 @@ public class OAuthSuccessHandler
             newUser.setCompany(company);
 
         } else {
-            // GitHub login = candidate
+            // candidate — no company needed
             newUser.setRole("candidate");
             newUser.setCompany(null);
         }
 
         return userRepository.save(newUser);
+    }
+
+    private String extractIntendedRole(HttpServletRequest request) {
+        Object role = request.getSession()
+                .getAttribute("intended_role");
+
+        // clear after reading — don't reuse on next login
+        request.getSession().removeAttribute("intended_role");
+
+        if (role != null) {
+            return role.toString();
+        }
+
+        // fallback — if someone hits OAuth directly
+        // without going through our login endpoints
+        String uri = request.getRequestURI();
+        if (uri.contains("github")) return "candidate";
+        return "recruiter";
     }
 
     // ─── EXTRACT PROVIDER ─────────────────────────────────

@@ -1,6 +1,7 @@
 import os
 import json
 import psycopg2
+import requests
 import redis
 from fastapi import FastAPI
 from confluent_kafka import Consumer, Producer, KafkaError
@@ -183,6 +184,12 @@ def process_application(event: dict):
         all_applications=all_applications
     )
 
+    # save resume vector to DB for future scoring runs
+    save_resume_vector_to_db(
+        application_id,
+        pipeline.bi_encoder.encode(resume_text)
+    )
+
     # cache JD vector only if it wasn't already in Redis
     if not jd_vector_cached and returned_jd_vector:
         cache_jd_vector_to_redis(job_id, returned_jd_vector)
@@ -193,6 +200,33 @@ def process_application(event: dict):
     publish_ranking_complete(result)
 
     print(f"Done. Score: {result['nlpScore']} for application: {application_id}")
+
+
+
+# ── SAVE RESUME VECTOR TO DB ──────────────────────────────
+# Stores the computed resume embedding back to PostgreSQL
+# Avoids re-computing on every scoring run
+
+def save_resume_vector_to_db(application_id: str, resume_vector: list[float]):
+    try:
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("""
+            UPDATE resumes
+            SET resume_vector = %s
+            FROM applications
+            WHERE applications.resume_id = resumes.id
+            AND applications.id = %s
+            AND resumes.resume_vector IS NULL
+        """, (json.dumps(resume_vector), application_id))
+        db.commit()
+        cursor.close()
+        db.close()
+        print(f"Resume vector saved for application: {application_id}")
+    except Exception as e:
+        print(f"Failed to save resume vector: {e}")
+
+
 
 # ── KAFKA CONSUMER LOOP ────────────────────────────────────
 

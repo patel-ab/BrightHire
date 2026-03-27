@@ -8,11 +8,11 @@ from dotenv import load_dotenv
 import templates.confirmation as confirmation
 import templates.shortlisted as shortlisted
 import templates.rejected as rejected
+import templates.reviewing as reviewing
 
 load_dotenv()
 
 # ── MAILTRAP CONFIG ────────────────────────────────────────
-# Grab these from Mailtrap → Inboxes → SMTP Settings
 
 MAILTRAP_HOST = "sandbox.smtp.mailtrap.io"
 MAILTRAP_PORT = 2525
@@ -42,6 +42,36 @@ def send_email(to_email: str, to_name: str, subject: str, html: str):
     except Exception as e:
         print(f"Failed to send email to {to_email} | error: {e}")
 
+# ── HANDLE APPLICATION RECEIVED ───────────────────────────
+# Fired by Spring Boot when candidate applies
+# Sends immediate confirmation email
+# Event fields: applicationId, jobId, userId, resumeId,
+#               resumeText, jdVector
+# NOTE: application-received does NOT carry email/name —
+#       those must come from your user DB or you add them
+#       to the ApplicationReceivedEvent in Spring Boot
+
+def handle_application_received(event: dict):
+    candidate_email = event.get("candidateEmail")
+    candidate_name  = event.get("candidateFullName")
+    job_title       = event.get("jobTitle")
+    company_name    = event.get("companyName")
+
+    if not candidate_email:
+        print("application-received: no email in event — skipping")
+        print("Tip: add candidateEmail, candidateFullName, jobTitle, companyName to ApplicationReceivedEvent in Spring Boot")
+        return
+
+    print(f"Application received for: {candidate_email} | job: {job_title}")
+
+    template = confirmation.render(candidate_name, job_title, company_name)
+    send_email(
+        candidate_email,
+        candidate_name,
+        template["subject"],
+        template["html"]
+    )
+
 # ── HANDLE STATUS CHANGED EVENT ───────────────────────────
 # Fired by Spring Boot ApplicationService.updateStatus()
 # Event fields: applicationId, jobId, userId,
@@ -62,9 +92,8 @@ def handle_status_changed(event: dict):
     print(f"Handling status change: {event.get('oldStatus')} -> {new_status} "
           f"for {candidate_email}")
 
-    # route to correct template based on new status
     if new_status == "reviewing":
-        template = confirmation.render(
+        template = reviewing.render(
             candidate_name, job_title, company_name
         )
 
@@ -98,18 +127,12 @@ def start_consumer():
             "KAFKA_BOOTSTRAP_SERVERS",
             "localhost:9092"
         ),
-        "group.id": os.getenv(
-            "KAFKA_GROUP_ID",
-            "notification-service-group"
-        ),
-        "auto.offset.reset": os.getenv(
-            "KAFKA_AUTO_OFFSET_RESET",
-            "earliest"
-        )
+        "group.id": "notification-service-group",  # ← bumped to reset offsets
+        "auto.offset.reset": "earliest"
     })
 
-    consumer.subscribe(["status-changed"])
-    print("Notification service started. Listening to status-changed...")
+    consumer.subscribe(["application-received", "status-changed"])
+    print("Notification service started. Listening to: application-received, status-changed...")
 
     try:
         while True:
@@ -126,8 +149,16 @@ def start_consumer():
                     continue
 
             try:
+                topic = msg.topic()
                 event = json.loads(msg.value().decode("utf-8"))
-                handle_status_changed(event)
+
+                if topic == "application-received":
+                    handle_application_received(event)
+                elif topic == "status-changed":
+                    handle_status_changed(event)
+                else:
+                    print(f"Unknown topic: {topic} — skipping")
+
                 consumer.commit()
 
             except Exception as e:

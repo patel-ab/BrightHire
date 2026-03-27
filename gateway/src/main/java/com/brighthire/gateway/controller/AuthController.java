@@ -11,6 +11,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -25,6 +26,33 @@ public class AuthController {
     private final JwtService jwtService;
     private final UserRepository userRepository;
     private final RedisTemplate<String, String> redisTemplate;
+
+
+    // ─── LOGIN ENDPOINTS ──────────────────────────────────────
+
+    @GetMapping("/login/candidate/github")
+    public void candidateGithubLogin(
+            HttpServletRequest request,
+            HttpServletResponse response) throws IOException, IOException {
+        request.getSession().setAttribute("intended_role", "candidate");
+        response.sendRedirect("/oauth2/authorization/github");
+    }
+
+    @GetMapping("/login/candidate/google")
+    public void candidateGoogleLogin(
+            HttpServletRequest request,
+            HttpServletResponse response) throws IOException {
+        request.getSession().setAttribute("intended_role", "candidate");
+        response.sendRedirect("/oauth2/authorization/google");
+    }
+
+    @GetMapping("/login/recruiter/google")
+    public void recruiterGoogleLogin(
+            HttpServletRequest request,
+            HttpServletResponse response) throws IOException {
+        request.getSession().setAttribute("intended_role", "recruiter");
+        response.sendRedirect("/oauth2/authorization/google");
+    }
 
     // ─── REFRESH TOKEN ────────────────────────────────────
     // Frontend calls this when access token expires

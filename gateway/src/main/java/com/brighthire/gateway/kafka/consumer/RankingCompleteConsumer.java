@@ -5,6 +5,7 @@ import com.brighthire.gateway.kafka.event.RankingCompleteEvent;
 import com.brighthire.gateway.config.KafkaConfig;
 import com.brighthire.gateway.model.Application;
 import com.brighthire.gateway.repository.ApplicationRepository;
+import com.brighthire.gateway.service.ApplicationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,6 +21,7 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class RankingCompleteConsumer {
 
+    private final ApplicationService applicationService;
     private final ApplicationRepository applicationRepository;
     private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
@@ -74,7 +76,20 @@ public class RankingCompleteConsumer {
                     event.getApplicationId()
             );
 
-            // Step 2 — update Redis shortlist sorted set
+            // Step 2 — update status to reviewing via service
+            // This fires StatusChangedEvent → Kafka → notification-service → email
+            applicationService.updateStatus(
+                    event.getApplicationId(),
+                    "reviewing"
+            );
+
+            log.info(
+                    "Status set to reviewing | " +
+                            "applicationId: {}",
+                    event.getApplicationId()
+            );
+
+            // Step 3 — update Redis shortlist sorted set
             String redisKey = "shortlist:" + event.getJobId();
             double score = event.getNlpScore().doubleValue();
             String member = event.getUserId().toString();
