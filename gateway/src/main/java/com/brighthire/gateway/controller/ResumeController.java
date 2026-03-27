@@ -1,12 +1,12 @@
 package com.brighthire.gateway.controller;
 
-import com.brighthire.gateway.dto.request.ResumeRequest;
 import com.brighthire.gateway.dto.response.ResumeResponse;
 import com.brighthire.gateway.service.ResumeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 import java.util.*;
 
 @RestController
@@ -16,11 +16,19 @@ public class ResumeController {
 
     private final ResumeService resumeService;
 
-    @PostMapping
-    public ResponseEntity<ResumeResponse> saveResume(
-            @RequestBody ResumeRequest request) {
-        ResumeResponse response = resumeService.saveResume(request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    // ─── UPLOAD ───────────────────────────────────────────
+    // Accepts multipart/form-data with PDF file + userId
+    // Replaces old JSON POST endpoint
+
+    @PostMapping(consumes = "multipart/form-data")
+    public ResponseEntity<ResumeResponse> uploadResume(
+            @RequestParam("userId") UUID userId,
+            @RequestParam("file") MultipartFile file) {
+        ResumeResponse response =
+                resumeService.uploadResume(userId, file);
+        return ResponseEntity
+                .status(HttpStatus.CREATED)
+                .body(response);
     }
 
     @GetMapping("/{id}")

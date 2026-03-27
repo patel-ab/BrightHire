@@ -71,7 +71,11 @@ public class ApplicationService {
                 candidate.getId(),
                 resume.getId(),
                 resume.getRawText(),
-                job.getJdVector()
+                job.getJdVector(),
+                candidate.getEmail(),
+                candidate.getFullName(),
+                job.getTitle(),
+                job.getCompany().getName()
         );
         kafkaProducerService.publishApplicationReceived(event);
 

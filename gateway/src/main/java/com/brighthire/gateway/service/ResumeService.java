@@ -7,8 +7,20 @@ import com.brighthire.gateway.model.User;
 import com.brighthire.gateway.repository.ResumeRepository;
 import com.brighthire.gateway.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+
+import java.io.IOException;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -19,30 +31,53 @@ public class ResumeService {
     private final ResumeRepository resumeRepository;
     private final UserRepository userRepository;
 
+    @Value("${aws.access-key-id}")
+    private String accessKeyId;
+
+    @Value("${aws.secret-access-key}")
+    private String secretAccessKey;
+
+    @Value("${aws.region}")
+    private String region;
+
+    @Value("${aws.s3.bucket}")
+    private String bucketName;
+
     private static final int MAX_FILE_SIZE_KB = 5120;
 
-    // ─── CREATE OR UPDATE ─────────────────────────────────
-    // If candidate already has a resume — update it
-    // If not — create a new one
-    // This is idempotent — safe to call multiple times
+    // ─── UPLOAD RESUME ────────────────────────────────────
+    // 1. Validate file and user
+    // 2. Extract text from PDF using PDFBox
+    // 3. Upload PDF to S3
+    // 4. Save resume record in PostgreSQL
 
     @Transactional
-    public ResumeResponse saveResume(ResumeRequest request) {
-        validateUserId(request.getUserId());
-        validateFileUrl(request.getFileUrl());
-        validateFileSize(request.getFileSizeKb());
-        validateRawText(request.getRawText());
+    public ResumeResponse uploadResume(UUID userId, MultipartFile file) {
 
-        User user = resolveCandidate(request.getUserId());
+        // validate
+        validateUserId(userId);
+        validateFile(file);
 
+        User user = resolveCandidate(userId);
+
+        // extract text from PDF
+        String rawText = extractTextFromPdf(file);
+
+        // upload to S3
+        String fileUrl = uploadToS3(file, userId);
+
+        // get file size in KB
+        int fileSizeKb = (int) (file.getSize() / 1024);
+
+        // upsert — create or update existing resume
         Resume resume = resumeRepository
-                .findByUserId(request.getUserId())
+                .findByUserId(userId)
                 .orElse(new Resume());
 
         resume.setUser(user);
-        resume.setRawText(request.getRawText());
-        resume.setFileUrl(request.getFileUrl());
-        resume.setFileSizeKb(request.getFileSizeKb());
+        resume.setRawText(rawText);
+        resume.setFileUrl(fileUrl);
+        resume.setFileSizeKb(fileSizeKb);
 
         Resume saved = resumeRepository.save(resume);
         resumeRepository.flush();
@@ -78,6 +113,81 @@ public class ResumeService {
         }
         resumeRepository.deleteById(id);
         return true;
+    }
+
+    // ─── S3 UPLOAD ────────────────────────────────────────
+    // Key format: resumes/{userId}/{uuid}.pdf
+    // Returns the S3 URL of the uploaded file
+
+    private String uploadToS3(MultipartFile file, UUID userId) {
+        try {
+            S3Client s3 = S3Client.builder()
+                    .region(Region.of(region))
+                    .credentialsProvider(
+                            StaticCredentialsProvider.create(
+                                    AwsBasicCredentials.create(
+                                            accessKeyId,
+                                            secretAccessKey
+                                    )
+                            )
+                    )
+                    .build();
+
+            String key = "resumes/" + userId + "/"
+                    + UUID.randomUUID() + ".pdf";
+
+            PutObjectRequest putRequest = PutObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(key)
+                    .contentType("application/pdf")
+                    .build();
+
+            s3.putObject(
+                    putRequest,
+                    RequestBody.fromBytes(file.getBytes())
+            );
+
+            // return S3 URL
+            return "https://" + bucketName
+                    + ".s3." + region
+                    + ".amazonaws.com/" + key;
+
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    "Failed to upload file to S3: " + e.getMessage()
+            );
+        }
+    }
+
+    // ─── PDF TEXT EXTRACTION ──────────────────────────────
+    // Uses Apache PDFBox to extract raw text from PDF
+    // rawText is passed to talent-matcher for NLP scoring
+
+    private String extractTextFromPdf(MultipartFile file) {
+        try {
+            PDDocument document = org.apache.pdfbox.Loader.loadPDF(
+                    file.getBytes()
+            );
+            PDFTextStripper stripper = new PDFTextStripper();
+            String text = stripper.getText(document);
+            document.close();
+
+            if (text == null || text.isBlank()) {
+                throw new IllegalArgumentException(
+                        "Could not extract text from PDF. " +
+                                "Make sure the PDF is not scanned or image-based."
+                );
+            }
+
+            return text.trim();
+
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Failed to read PDF file: " + e.getMessage()
+            );
+        }
     }
 
     // ─── MAPPING ──────────────────────────────────────────
@@ -121,32 +231,26 @@ public class ResumeService {
         }
     }
 
-    private void validateFileUrl(String fileUrl) {
-        if (fileUrl == null || fileUrl.isBlank()) {
+    private void validateFile(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException(
-                    "File URL cannot be empty"
+                    "File cannot be empty"
             );
         }
-    }
 
-    private void validateFileSize(Integer fileSizeKb) {
-        if (fileSizeKb == null || fileSizeKb <= 0) {
+        String filename = file.getOriginalFilename();
+        if (filename == null ||
+                !filename.toLowerCase().endsWith(".pdf")) {
             throw new IllegalArgumentException(
-                    "File size must be greater than 0"
+                    "Only PDF files are allowed"
             );
         }
+
+        long fileSizeKb = file.getSize() / 1024;
         if (fileSizeKb > MAX_FILE_SIZE_KB) {
             throw new IllegalArgumentException(
                     "File size exceeds maximum allowed size of "
                             + MAX_FILE_SIZE_KB + " KB"
-            );
-        }
-    }
-
-    private void validateRawText(String rawText) {
-        if (rawText == null || rawText.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Resume text cannot be empty"
             );
         }
     }

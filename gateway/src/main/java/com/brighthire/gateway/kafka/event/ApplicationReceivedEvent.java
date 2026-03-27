@@ -15,4 +15,10 @@ public class ApplicationReceivedEvent {
     private UUID resumeId;
     private String resumeText;
     private String jdVector;
+
+    // ── added for notification-service email ──────────────
+    private String candidateEmail;
+    private String candidateFullName;
+    private String jobTitle;
+    private String companyName;
 }
