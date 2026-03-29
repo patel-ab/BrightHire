@@ -59,9 +59,13 @@ public class OAuthSuccessHandler
         String fullName = extractFullName(attributes, provider);
         String avatarUrl = extractAvatarUrl(attributes, provider);
 
-        // Step 4 — find existing user or create new one
+        // Step 3b — role is determined purely by provider
+        // github → candidate, google → recruiter
+        String role = "github".equals(provider) ? "candidate" : "recruiter";
+
+        // Step 4 — find existing account for this provider+id, or create one
         User user = findOrCreateUser(
-                request, provider, oauthId, email, fullName, avatarUrl, attributes
+                role, provider, oauthId, email, fullName, avatarUrl, attributes
         );
 
         // Step 5 — generate JWT tokens
@@ -106,7 +110,7 @@ public class OAuthSuccessHandler
     //              new user = create account
 
     private User findOrCreateUser(
-            HttpServletRequest request,
+            String intendedRole,
             String provider,
             String oauthId,
             String email,
@@ -132,10 +136,6 @@ public class OAuthSuccessHandler
         newUser.setOauthProvider(provider);
         newUser.setOauthId(oauthId);
         newUser.setAvatarUrl(avatarUrl);
-
-        // Determine role from session
-        // falls back to provider-based guess if session empty
-        String intendedRole = extractIntendedRole(request);
 
         if ("recruiter".equals(intendedRole)) {
             String domain = extractDomain(email);
@@ -169,24 +169,6 @@ public class OAuthSuccessHandler
         }
 
         return userRepository.save(newUser);
-    }
-
-    private String extractIntendedRole(HttpServletRequest request) {
-        Object role = request.getSession()
-                .getAttribute("intended_role");
-
-        // clear after reading — don't reuse on next login
-        request.getSession().removeAttribute("intended_role");
-
-        if (role != null) {
-            return role.toString();
-        }
-
-        // fallback — if someone hits OAuth directly
-        // without going through our login endpoints
-        String uri = request.getRequestURI();
-        if (uri.contains("github")) return "candidate";
-        return "recruiter";
     }
 
     // ─── EXTRACT PROVIDER ─────────────────────────────────

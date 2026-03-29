@@ -31,8 +31,19 @@ public class ApplicationService {
     private final ResumeRepository resumeRepository;
 
     private static final List<String> VALID_STATUSES = List.of(
-            "applied", "reviewing", "shortlisted",
+            "applied", "reviewing", "shortlisted", "interview",
+            "interview_accepted", "interview_rejected",
             "rejected", "withdrawn"
+    );
+
+    // Statuses a recruiter may move an application INTO
+    private static final List<String> RECRUITER_ALLOWED_TRANSITIONS = List.of(
+            "shortlisted", "interview", "rejected"
+    );
+
+    // Statuses from which a recruiter may act (non-terminal, non-withdrawn)
+    private static final List<String> RECRUITER_ACTIONABLE_FROM = List.of(
+            "applied", "reviewing", "shortlisted", "interview"
     );
 
     // ─── CREATE ───────────────────────────────────────────
@@ -148,6 +159,109 @@ public class ApplicationService {
         });
     }
 
+    // ─── RECRUITER STATUS UPDATE ──────────────────────────
+    // Allowed transitions: shortlisted, interview, rejected
+    // Enforces company-scoped authorization
+
+    @Transactional
+    public ApplicationResponse recruiterUpdateStatus(
+            UUID applicationId, UUID recruiterId, String newStatus) {
+
+        if (!RECRUITER_ALLOWED_TRANSITIONS.contains(newStatus)) {
+            throw new IllegalArgumentException(
+                    "Recruiter can only set status to: " + RECRUITER_ALLOWED_TRANSITIONS
+            );
+        }
+
+        Application application = applicationRepository.findById(applicationId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Application not found: " + applicationId
+                ));
+
+        User recruiter = userRepository.findById(recruiterId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Recruiter not found: " + recruiterId
+                ));
+
+        // Company-scope check
+        if (recruiter.getCompany() == null ||
+                !application.getJob().getCompany().getId()
+                        .equals(recruiter.getCompany().getId())) {
+            throw new IllegalArgumentException(
+                    "Access denied: application does not belong to your company"
+            );
+        }
+
+        // Only allow acting on non-terminal statuses
+        if (!RECRUITER_ACTIONABLE_FROM.contains(application.getStatus())) {
+            throw new IllegalArgumentException(
+                    "Cannot update application in status: " + application.getStatus()
+            );
+        }
+
+        String oldStatus = application.getStatus();
+        application.setStatus(newStatus);
+        Application saved = applicationRepository.save(application);
+
+        StatusChangedEvent event = new StatusChangedEvent(
+                saved.getId(), saved.getJob().getId(), saved.getUser().getId(),
+                oldStatus, newStatus,
+                saved.getUser().getEmail(), saved.getUser().getFullName(),
+                saved.getJob().getTitle(), saved.getJob().getCompany().getName()
+        );
+        kafkaProducerService.publishStatusChanged(event);
+
+        return toResponse(saved);
+    }
+
+    // ─── CANDIDATE INTERVIEW RESPONSE ─────────────────────
+    // Candidate may accept or reject only when status = interview
+
+    @Transactional
+    public ApplicationResponse candidateRespondToInterview(
+            UUID applicationId, UUID candidateId, String response) {
+
+        if (!"interview_accepted".equals(response) &&
+                !"interview_rejected".equals(response)) {
+            throw new IllegalArgumentException(
+                    "Response must be 'interview_accepted' or 'interview_rejected'"
+            );
+        }
+
+        Application application = applicationRepository.findById(applicationId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Application not found: " + applicationId
+                ));
+
+        // Ownership check
+        if (!application.getUser().getId().equals(candidateId)) {
+            throw new IllegalArgumentException(
+                    "You can only respond to your own application"
+            );
+        }
+
+        // Must be in interview state
+        if (!"interview".equals(application.getStatus())) {
+            throw new IllegalArgumentException(
+                    "Interview response is only allowed when status is 'interview'"
+            );
+        }
+
+        String oldStatus = application.getStatus();
+        application.setStatus(response);
+        Application saved = applicationRepository.save(application);
+
+        StatusChangedEvent event = new StatusChangedEvent(
+                saved.getId(), saved.getJob().getId(), saved.getUser().getId(),
+                oldStatus, response,
+                saved.getUser().getEmail(), saved.getUser().getFullName(),
+                saved.getJob().getTitle(), saved.getJob().getCompany().getName()
+        );
+        kafkaProducerService.publishStatusChanged(event);
+
+        return toResponse(saved);
+    }
+
     // ─── WITHDRAW ─────────────────────────────────────────
 
     @Transactional
@@ -200,6 +314,10 @@ public class ApplicationService {
         if (application.getJob() != null) {
             response.setJobId(application.getJob().getId());
             response.setJobTitle(application.getJob().getTitle());
+            response.setJobLocation(application.getJob().getLocation());
+            if (application.getJob().getCompany() != null) {
+                response.setCompanyName(application.getJob().getCompany().getName());
+            }
         }
         if (application.getUser() != null) {
             response.setUserId(application.getUser().getId());
