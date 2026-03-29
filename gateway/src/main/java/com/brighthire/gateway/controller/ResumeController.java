@@ -52,6 +52,15 @@ public class ResumeController {
         return ResponseEntity.ok(resumeService.getAllResumes());
     }
 
+    // Returns a 15-minute pre-signed S3 URL for the resume PDF.
+    // Accessible to both candidates (own resume) and recruiters (applicant review).
+    @GetMapping("/{id}/signed-url")
+    public ResponseEntity<Map<String, String>> getSignedUrl(
+            @PathVariable UUID id) {
+        String url = resumeService.generateSignedUrl(id);
+        return ResponseEntity.ok(Map.of("url", url));
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteResume(
             @PathVariable UUID id) {

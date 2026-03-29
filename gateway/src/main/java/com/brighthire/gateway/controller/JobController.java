@@ -1,12 +1,13 @@
 package com.brighthire.gateway.controller;
 
-import com.brighthire.gateway.dto.response.ShortlistResponse;
+import com.brighthire.gateway.dto.response.ApplicantResponse;
 import com.brighthire.gateway.dto.request.JobRequest;
 import com.brighthire.gateway.dto.response.JobResponse;
 import com.brighthire.gateway.service.JobService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import java.util.*;
 
@@ -45,6 +46,14 @@ public class JobController {
         );
     }
 
+    @GetMapping("/company/{companyId}/all")
+    public ResponseEntity<List<JobResponse>> getAllJobsByCompany(
+            @PathVariable UUID companyId) {
+        return ResponseEntity.ok(
+                jobService.getAllJobsByCompany(companyId)
+        );
+    }
+
     @PatchMapping("/{id}")
     public ResponseEntity<JobResponse> updateJob(
             @PathVariable UUID id,
@@ -63,14 +72,15 @@ public class JobController {
                 : ResponseEntity.notFound().build();
     }
 
-// ─── SHORTLIST ────────────────────────────────────────────
-// Returns top 20 candidates ranked by nlp_score
-// Reads from Redis sorted set, enriched with DB data
-    @GetMapping("/{id}/shortlist")
-    public ResponseEntity<List<ShortlistResponse>> getShortlist(
-            @PathVariable UUID id) {
-        return ResponseEntity.ok(
-                jobService.getShortlist(id)
-        );
+    // ─── APPLICANTS ───────────────────────────────────────────
+    // Returns all applicants for a job, enriched with full candidate profile.
+    // Scoped to the authenticated recruiter's own company.
+    @GetMapping("/{id}/applicants")
+    public ResponseEntity<List<ApplicantResponse>> getApplicants(
+            @PathVariable UUID id,
+            Authentication auth) {
+        UUID recruiterId = UUID.fromString(auth.getName());
+        return ResponseEntity.ok(jobService.getApplicants(id, recruiterId));
     }
+
 }

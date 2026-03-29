@@ -10,6 +10,8 @@ public class ApplicationResponse {
     private UUID id;
     private UUID jobId;
     private String jobTitle;
+    private String jobLocation;
+    private String companyName;
     private UUID userId;
     private String userFullName;
     private UUID resumeId;

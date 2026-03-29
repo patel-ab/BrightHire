@@ -19,6 +19,11 @@ import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import java.time.Duration;
+import java.net.URL;
 
 import java.io.IOException;
 import java.util.*;
@@ -102,6 +107,44 @@ public class ResumeService {
                 .stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
+    }
+
+    // ─── SIGNED URL ───────────────────────────────────────
+    // Generates a 15-minute pre-signed GET URL for a resume stored in S3.
+    // Used by recruiters to view candidate PDFs without making the bucket public.
+
+    public String generateSignedUrl(UUID resumeId) {
+        Resume resume = resumeRepository.findById(resumeId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Resume with id " + resumeId + " not found"
+                ));
+
+        // Extract S3 key from the stored URL
+        // Format: https://{bucket}.s3.{region}.amazonaws.com/{key}
+        String fileUrl = resume.getFileUrl();
+        String prefix = "amazonaws.com/";
+        String key = fileUrl.substring(fileUrl.indexOf(prefix) + prefix.length());
+
+        S3Presigner presigner = S3Presigner.builder()
+                .region(Region.of(region))
+                .credentialsProvider(
+                        StaticCredentialsProvider.create(
+                                AwsBasicCredentials.create(accessKeyId, secretAccessKey)
+                        )
+                )
+                .build();
+
+        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
+                .signatureDuration(Duration.ofMinutes(15))
+                .getObjectRequest(GetObjectRequest.builder()
+                        .bucket(bucketName)
+                        .key(key)
+                        .build())
+                .build();
+
+        URL signedUrl = presigner.presignGetObject(presignRequest).url();
+        presigner.close();
+        return signedUrl.toString();
     }
 
     // ─── DELETE ───────────────────────────────────────────

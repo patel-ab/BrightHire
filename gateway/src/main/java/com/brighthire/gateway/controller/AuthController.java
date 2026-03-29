@@ -29,28 +29,19 @@ public class AuthController {
 
 
     // ─── LOGIN ENDPOINTS ──────────────────────────────────────
+    // GitHub → candidate only
+    // Google → recruiter only
+    // Role is derived from provider in OAuthSuccessHandler — no session needed
 
     @GetMapping("/login/candidate/github")
     public void candidateGithubLogin(
-            HttpServletRequest request,
-            HttpServletResponse response) throws IOException, IOException {
-        request.getSession().setAttribute("intended_role", "candidate");
-        response.sendRedirect("/oauth2/authorization/github");
-    }
-
-    @GetMapping("/login/candidate/google")
-    public void candidateGoogleLogin(
-            HttpServletRequest request,
             HttpServletResponse response) throws IOException {
-        request.getSession().setAttribute("intended_role", "candidate");
-        response.sendRedirect("/oauth2/authorization/google");
+        response.sendRedirect("/oauth2/authorization/github");
     }
 
     @GetMapping("/login/recruiter/google")
     public void recruiterGoogleLogin(
-            HttpServletRequest request,
             HttpServletResponse response) throws IOException {
-        request.getSession().setAttribute("intended_role", "recruiter");
         response.sendRedirect("/oauth2/authorization/google");
     }
 

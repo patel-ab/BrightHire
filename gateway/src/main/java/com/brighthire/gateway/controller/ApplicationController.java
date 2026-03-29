@@ -6,6 +6,7 @@ import com.brighthire.gateway.service.ApplicationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import java.util.*;
 
@@ -76,5 +77,31 @@ public class ApplicationController {
         return applicationService.withdraw(id, userId)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    // ─── RECRUITER: set status to shortlisted / interview / rejected ───
+    @PatchMapping("/{id}/recruiter-status")
+    public ResponseEntity<ApplicationResponse> recruiterUpdateStatus(
+            @PathVariable UUID id,
+            @RequestBody Map<String, String> body,
+            Authentication auth) {
+        UUID recruiterId = UUID.fromString(auth.getName());
+        String status = body.get("status");
+        return ResponseEntity.ok(
+                applicationService.recruiterUpdateStatus(id, recruiterId, status)
+        );
+    }
+
+    // ─── CANDIDATE: respond to interview invite ────────────────────────
+    @PatchMapping("/{id}/candidate-response")
+    public ResponseEntity<ApplicationResponse> candidateResponse(
+            @PathVariable UUID id,
+            @RequestBody Map<String, String> body,
+            Authentication auth) {
+        UUID candidateId = UUID.fromString(auth.getName());
+        String response = body.get("response");
+        return ResponseEntity.ok(
+                applicationService.candidateRespondToInterview(id, candidateId, response)
+        );
     }
 }

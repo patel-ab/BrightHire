@@ -2,8 +2,12 @@ package com.brighthire.gateway.service;
 
 
 import org.springframework.data.redis.core.RedisTemplate;
-import com.brighthire.gateway.dto.response.ShortlistResponse;
+import com.brighthire.gateway.dto.response.ApplicantResponse;
+import com.brighthire.gateway.model.CandidateProfile;
+import com.brighthire.gateway.model.Resume;
 import com.brighthire.gateway.repository.ApplicationRepository;
+import com.brighthire.gateway.repository.CandidateProfileRepository;
+import com.brighthire.gateway.repository.ResumeRepository;
 import com.brighthire.gateway.model.Application;
 import com.brighthire.gateway.kafka.producer.KafkaProducerService;
 import com.brighthire.gateway.kafka.event.JobPostedEvent;
@@ -30,6 +34,8 @@ public class JobService {
 
     private final RedisTemplate<String, String> redisTemplate;
     private final ApplicationRepository applicationRepository;
+    private final CandidateProfileRepository candidateProfileRepository;
+    private final ResumeRepository resumeRepository;
     private final KafkaProducerService kafkaProducerService;
     private final JobRepository jobRepository;
     private final CompanyRepository companyRepository;
@@ -108,6 +114,14 @@ public class JobService {
                 .collect(Collectors.toList());
     }
 
+    public List<JobResponse> getAllJobsByCompany(UUID companyId) {
+        return jobRepository
+                .findByCompanyIdOrderByCreatedAtDesc(companyId)
+                .stream()
+                .map(this::toResponse)
+                .collect(Collectors.toList());
+    }
+
     // ─── UPDATE ───────────────────────────────────────────
 
     @Transactional
@@ -152,80 +166,94 @@ public class JobService {
         return true;
     }
 
-    // ─── SHORTLIST ────────────────────────────────────────────
-// Reads top 20 candidates from Redis sorted set
-// Enriches with user + application data from PostgreSQL
-// Returns ranked list ordered by nlp_score descending
-    public List<ShortlistResponse> getShortlist(UUID jobId) {
+    // ─── APPLICANTS ───────────────────────────────────────────
+    // Reads all scored candidates from the Redis sorted set for this job,
+    // ordered by NLP score descending. Enriches each entry with full profile,
+    // resume, and application metadata from PostgreSQL.
+    // Company-scoped: recruiter must belong to the job's company.
 
-        // Step 1 — verify job exists
-        if (!jobRepository.existsById(jobId)) {
-            throw new IllegalArgumentException(
-                    "Job with id " + jobId + " not found"
-            );
+    @Transactional(readOnly = true)
+    public List<ApplicantResponse> getApplicants(UUID jobId, UUID recruiterId) {
+        Job job = jobRepository.findById(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
+
+        User recruiter = userRepository.findById(recruiterId)
+                .orElseThrow(() -> new IllegalArgumentException("Recruiter not found: " + recruiterId));
+
+        // Scope check: job must belong to recruiter's company
+        if (recruiter.getCompany() == null ||
+                !job.getCompany().getId().equals(recruiter.getCompany().getId())) {
+            throw new IllegalArgumentException("Access denied: job does not belong to your company");
         }
 
-        // Step 2 — read top 20 from Redis sorted set
-        // ZREVRANGE returns highest score first
+        // Read all scored candidates from Redis sorted set, highest score first.
+        // 0, -1 means the full set — no cap.
         String redisKey = "shortlist:" + jobId;
         Set<ZSetOperations.TypedTuple<String>> redisResults =
-                redisTemplate.opsForZSet()
-                        .reverseRangeWithScores(redisKey, 0, 19);
+                redisTemplate.opsForZSet().reverseRangeWithScores(redisKey, 0, -1);
 
         if (redisResults == null || redisResults.isEmpty()) {
             return List.of();
         }
 
-        // Step 3 — enrich each entry with DB data
-        List<ShortlistResponse> shortlist = new ArrayList<>();
-        int rank = 1;
+        List<ApplicantResponse> applicants = new ArrayList<>();
 
         for (ZSetOperations.TypedTuple<String> entry : redisResults) {
-
             String userIdStr = entry.getValue();
             Double score = entry.getScore();
-
             if (userIdStr == null || score == null) continue;
 
             UUID userId = UUID.fromString(userIdStr);
 
-            // fetch application record for this user + job
             Optional<Application> applicationOpt =
-                    applicationRepository
-                            .findByJobIdAndUserId(jobId, userId);
-
+                    applicationRepository.findByJobIdAndUserId(jobId, userId);
             if (applicationOpt.isEmpty()) continue;
 
-            Application application = applicationOpt.get();
+            Application app = applicationOpt.get();
+            User candidate = app.getUser();
 
-            ShortlistResponse response = new ShortlistResponse();
-            response.setUserId(userId);
-            response.setUserFullName(
-                    application.getUser().getFullName()
-            );
-            response.setUserAvatarUrl(
-                    application.getUser().getAvatarUrl()
-            );
-            response.setApplicationId(application.getId());
-            response.setResumeId(application.getResume().getId());
-            response.setNlpScore(
-                    BigDecimal.valueOf(score)
-            );
-            response.setScoreBreakdown(
-                    application.getScoreBreakdown()
-            );
-            response.setRankingVersion(
-                    application.getRankingVersion()
-            );
-            response.setAppliedAt(application.getAppliedAt());
-            response.setRankedAt(application.getRankedAt());
-            response.setRank(rank++);
+            ApplicantResponse r = new ApplicantResponse();
 
-            shortlist.add(response);
+            // Identity
+            r.setUserId(candidate.getId());
+            r.setFullName(candidate.getFullName());
+            r.setAvatarUrl(candidate.getAvatarUrl());
+            r.setEmail(candidate.getEmail());
+
+            // Application metadata — use Redis score as the authoritative ranking score
+            r.setApplicationId(app.getId());
+            r.setApplicationStatus(app.getStatus());
+            r.setAppliedAt(app.getAppliedAt());
+            r.setNlpScore(BigDecimal.valueOf(score));
+            r.setScoreBreakdown(app.getScoreBreakdown());
+
+            // Candidate profile (may not exist yet)
+            candidateProfileRepository.findByUserId(userId).ifPresent(profile -> {
+                r.setHeadline(profile.getHeadline());
+                r.setSummary(profile.getSummary());
+                r.setLocation(profile.getLocation());
+                r.setYearsOfExperience(profile.getYearsOfExperience());
+                r.setSkills(profile.getSkills());
+                r.setLinkedinUrl(profile.getLinkedinUrl());
+                r.setGithubUrl(profile.getGithubUrl());
+                r.setPortfolioUrl(profile.getPortfolioUrl());
+                r.setPhone(profile.getPhone());
+            });
+
+            // Resume
+            if (app.getResume() != null) {
+                Resume resume = app.getResume();
+                r.setResumeId(resume.getId());
+                r.setResumeFileUrl(resume.getFileUrl());
+                r.setResumeFileSizeKb(resume.getFileSizeKb());
+            }
+
+            applicants.add(r);
         }
 
-        return shortlist;
+        return applicants;
     }
+
 
     // ─── MAPPING ──────────────────────────────────────────
 
@@ -248,6 +276,7 @@ public class JobService {
             response.setPostedById(job.getPostedBy().getId());
             response.setPostedByName(job.getPostedBy().getFullName());
         }
+        response.setApplicationCount(applicationRepository.countByJobId(job.getId()));
         return response;
     }
 

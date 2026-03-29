@@ -12,6 +12,8 @@ public interface JobRepository extends JpaRepository<Job, UUID> {
 
     List<Job> findByCompanyIdAndStatus(UUID companyId, String status);
 
+    List<Job> findByCompanyIdOrderByCreatedAtDesc(UUID companyId);
+
     List<Job> findByStatusOrderByCreatedAtDesc(String status);
 
     List<Job> findByExpiresAtBeforeAndStatus(OffsetDateTime dateTime, String status);

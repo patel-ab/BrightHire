@@ -20,4 +20,5 @@ public class JobResponse {
     private String status;
     private OffsetDateTime expiresAt;
     private OffsetDateTime createdAt;
+    private long applicationCount;
 }
