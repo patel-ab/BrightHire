@@ -8,11 +8,9 @@ import { getAllJobsByCompany } from '../../api/dashboard'
 // ─── FILTER CONFIG ────────────────────────────────────────
 
 const STATUS_FILTER_OPTIONS = [
-  { value: 'all',       label: 'All Statuses' },
-  { value: 'active',    label: 'Active'       },
-  { value: 'closed',    label: 'Closed'       },
-  { value: 'expired',   label: 'Expired'      },
-  { value: 'draft',     label: 'Draft'        },
+  { value: 'all',    label: 'All Statuses' },
+  { value: 'active', label: 'Active'       },
+  { value: 'closed', label: 'Closed'       },
 ]
 
 const STATUS_FILTER_LABELS = Object.fromEntries(
@@ -22,10 +20,8 @@ const STATUS_FILTER_LABELS = Object.fromEntries(
 // ─── STATUS BADGE ─────────────────────────────────────────
 
 const JOB_STATUS_STYLES = {
-  active:   { bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/20', label: 'Active'   },
-  closed:   { bg: 'bg-[#2d3148]/60',   text: 'text-[#64748b]',   border: 'border-[#2d3148]',      label: 'Closed'   },
-  draft:    { bg: 'bg-yellow-500/10',  text: 'text-yellow-400',  border: 'border-yellow-500/20',  label: 'Draft'    },
-  expired:  { bg: 'bg-red-500/10',     text: 'text-red-400',     border: 'border-red-500/20',     label: 'Expired'  },
+  active: { bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/20', label: 'Active' },
+  closed: { bg: 'bg-[#2d3148]/60',   text: 'text-[#64748b]',   border: 'border-[#2d3148]',      label: 'Closed' },
 }
 
 function JobStatusBadge({ status }) {

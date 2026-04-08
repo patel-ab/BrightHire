@@ -4,11 +4,11 @@ import {
   Zap, LogOut, ArrowLeft, Users, AlertCircle, Loader2,
   Search, X, ChevronDown, MapPin, Briefcase, Link2,
   Github, ExternalLink, FileText, Star, Clock, Phone,
-  UserCircle2, SlidersHorizontal
+  UserCircle2, SlidersHorizontal, CheckCircle
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../context/AuthContext'
-import { getApplicants, getResumeSignedUrl, recruiterUpdateStatus } from '../../api/dashboard'
+import { getApplicants, getResumeSignedUrl, recruiterUpdateStatus, closeJob } from '../../api/dashboard'
 
 // ─── APPLICATION STATUS BADGE ─────────────────────────────
 
@@ -365,6 +365,17 @@ export default function RecruiterApplicants() {
   const [loading, setLoading]       = useState(true)
   const [error, setError]           = useState(false)
   const [selected, setSelected]     = useState(null) // applicant in drawer
+  const [closing, setClosing]       = useState(false)
+
+  const handleCloseJob = async () => {
+    setClosing(true)
+    try {
+      await closeJob(jobId)
+      navigate('/recruiter', { state: { closedJobTitle: jobTitle } })
+    } catch {
+      setClosing(false)
+    }
+  }
 
   // Called by drawer after a successful status update — updates both list and open drawer
   const handleStatusChange = (applicationId, newStatus) => {
@@ -462,16 +473,31 @@ export default function RecruiterApplicants() {
             <ArrowLeft size={13} />
             Back to dashboard
           </button>
-          <p className="text-xs font-medium text-emerald-400 uppercase tracking-widest mb-1">Applicants</p>
-          <h1 className="text-2xl font-bold text-white truncate">{jobTitle}</h1>
-          <p className="text-[#64748b] text-sm mt-1">
-            {loading
-              ? 'Loading applicants…'
-              : hasFilters
-                ? `${filtered.length} of ${applicants.length} applicant${applicants.length !== 1 ? 's' : ''}`
-                : `${applicants.length} applicant${applicants.length !== 1 ? 's' : ''} total`
-            }
-          </p>
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-emerald-400 uppercase tracking-widest mb-1">Applicants</p>
+              <h1 className="text-2xl font-bold text-white truncate">{jobTitle}</h1>
+              <p className="text-[#64748b] text-sm mt-1">
+                {loading
+                  ? 'Loading applicants…'
+                  : hasFilters
+                    ? `${filtered.length} of ${applicants.length} applicant${applicants.length !== 1 ? 's' : ''}`
+                    : `${applicants.length} applicant${applicants.length !== 1 ? 's' : ''} total`
+                }
+              </p>
+            </div>
+            <button
+              onClick={handleCloseJob}
+              disabled={closing}
+              className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white border border-emerald-500 shadow shadow-emerald-600/20 transition-all"
+            >
+              {closing
+                ? <Loader2 size={14} className="animate-spin" />
+                : <CheckCircle size={14} />
+              }
+              {closing ? 'Closing…' : 'Recruitment Complete'}
+            </button>
+          </div>
         </div>
 
         {/* Filters */}

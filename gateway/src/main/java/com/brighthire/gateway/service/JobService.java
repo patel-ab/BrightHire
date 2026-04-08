@@ -45,7 +45,7 @@ public class JobService {
             List.of("junior", "mid", "senior", "lead");
 
     private static final List<String> VALID_STATUSES =
-            List.of("active", "reviewing", "closed", "expired");
+            List.of("active", "closed");
 
     // ─── CREATE ───────────────────────────────────────────
 

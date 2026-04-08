@@ -42,6 +42,9 @@ export const recruiterUpdateStatus = (applicationId, status) =>
 export const candidateRespondToInterview = (applicationId, response) =>
   client.patch(`/api/applications/${applicationId}/candidate-response`, { response }).then((r) => r.data)
 
+export const closeJob = (jobId) =>
+  client.patch(`/api/jobs/${jobId}`, { status: 'closed' }).then((r) => r.data)
+
 export const uploadResume = (userId, file) => {
   const fd = new FormData()
   fd.append('userId', userId)
